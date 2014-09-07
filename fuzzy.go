@@ -23,10 +23,21 @@ type Potential struct {
 	method int // 0 - is word, 1 - suggest maps to input, 2 - input delete maps to dictionary, 3 - input delete maps to suggest
 }
 
+type Suggestion struct {
+	Term string
+	Domain
+}
+
+type Domain struct {
+	Name      string
+	Frequency int
+}
+
 type Model struct {
 	Data      map[string]int      `json:"data"`
 	Maxcount  int                 `json:"maxcount"`
 	Suggest   map[string][]string `json:"suggest"`
+	Domains   map[string]Domain   `json:"type"`
 	Depth     int                 `json:"depth"`
 	Threshold int                 `json:"threshold"`
 	sync.RWMutex
@@ -41,6 +52,7 @@ func NewModel() *Model {
 func (model *Model) Init() *Model {
 	model.Data = make(map[string]int)
 	model.Suggest = make(map[string][]string)
+	model.Domains = make(map[string]Domain)
 	model.Depth = 2
 	model.Threshold = 3 // Setting this to 1 is most accurate, but "1" is 5x more memory and 30x slower processing than "4". This is a big performance tuning knob
 	return model
@@ -146,10 +158,17 @@ func (model *Model) Train(terms []string) {
 // counts without needing to run "TrainWord" repeatedly
 func (model *Model) SetCount(term string, count int, suggest bool) {
 	model.Lock()
-	model.Data[term] = count
+	model.Data[term] += count
 	if suggest {
 		model.createSuggestKeys(term)
 	}
+	model.Unlock()
+}
+
+// Manually set the domain/type/class of a word. This is for arbitrary classification of terms.
+func (model *Model) SetDomain(term string, count int, domain string) {
+	model.Lock()
+	model.Domains[term] = Domain{Name: domain, Frequency: count}
 	model.Unlock()
 }
 
@@ -365,6 +384,20 @@ func (model *Model) Suggestions(input string, exhaustive bool) []string {
 	output := make([]string, 10)
 	for _, suggestion := range suggestions {
 		output = append(output, suggestion.term)
+	}
+	return output
+}
+
+func (model *Model) DomainSuggestions(input string, exhaustive bool) []Suggestion {
+	model.RLock()
+	suggestions := model.suggestPotential(input, exhaustive)
+	model.RUnlock()
+	output := make([]Suggestion, 0)
+	for _, suggestion := range suggestions {
+		var s Suggestion
+		s.Term = suggestion.term
+		s.Domain = model.Domains[suggestion.term]
+		output = append(output, s)
 	}
 	return output
 }

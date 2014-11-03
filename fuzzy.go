@@ -24,8 +24,8 @@ type Potential struct {
 }
 
 type Suggestion struct {
-	Term string
-	Domain
+	Term    string
+	Domains []Domain
 }
 
 type Domain struct {
@@ -37,7 +37,7 @@ type Model struct {
 	Data      map[string]int      `json:"data"`
 	Maxcount  int                 `json:"maxcount"`
 	Suggest   map[string][]string `json:"suggest"`
-	Domains   map[string]Domain   `json:"type"`
+	Domains   map[string][]Domain `json:"type"`
 	Depth     int                 `json:"depth"`
 	Threshold int                 `json:"threshold"`
 	sync.RWMutex
@@ -52,7 +52,7 @@ func NewModel() *Model {
 func (model *Model) Init() *Model {
 	model.Data = make(map[string]int)
 	model.Suggest = make(map[string][]string)
-	model.Domains = make(map[string]Domain)
+	model.Domains = make(map[string][]Domain)
 	model.Depth = 2
 	model.Threshold = 3 // Setting this to 1 is most accurate, but "1" is 5x more memory and 30x slower processing than "4". This is a big performance tuning knob
 	return model
@@ -168,8 +168,16 @@ func (model *Model) SetCount(term string, count int, suggest bool) {
 // Manually set the domain/type/class of a word. This is for arbitrary classification of terms.
 func (model *Model) SetDomain(term string, count int, domain string) {
 	model.Lock()
-	model.Domains[term] = Domain{Name: domain, Frequency: count}
-	model.Unlock()
+	defer model.Unlock()
+
+	for _, existing := range model.Domains[term] {
+		if existing.Name == domain {
+			existing.Frequency += count
+			return
+		}
+	}
+
+	model.Domains[term] = append(model.Domains[term], Domain{Name: domain, Frequency: count})
 }
 
 // Train the model word by word
@@ -396,7 +404,7 @@ func (model *Model) DomainSuggestions(input string, exhaustive bool) []Suggestio
 	for _, suggestion := range suggestions {
 		var s Suggestion
 		s.Term = suggestion.term
-		s.Domain = model.Domains[suggestion.term]
+		s.Domains = model.Domains[suggestion.term]
 		output = append(output, s)
 	}
 	return output
